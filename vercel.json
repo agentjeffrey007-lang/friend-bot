@@ -1,5 +1,0 @@
-{
-  "buildCommand": "cd nano-coloring-web && npm run build",
-  "outputDirectory": "nano-coloring-web/build",
-  "ignoreCommand": "git diff --quiet HEAD^ HEAD -- nano-coloring-web"
-}

@@ -25,8 +25,12 @@ export default function CheckoutScreen({ route, navigation }) {
   const total = subtotal + tax;
 
   const handleCheckout = async () => {
-    Alert.alert('Order Confirmed', `Total: $${total.toFixed(2)}\n\nShips in 4-6 weeks`);
-    navigation.popToTop();
+    // Mock checkout for now - Stripe will be integrated later
+    Alert.alert(
+      'Order Confirmed',
+      `Total: $${total.toFixed(2)}\nShips in 4-6 weeks\n\n(Stripe integration coming soon)`,
+      [{ text: 'OK', onPress: () => navigation.popToTop() }]
+    );
   };
 
   return (

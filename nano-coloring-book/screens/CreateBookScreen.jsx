@@ -67,19 +67,22 @@ export default function CreateBookScreen({ navigation }) {
       const generatedImages = await generateImage(
         finalPrompt,
         PAGE_COUNT,
-        (currentIndex, totalCount) => {
+        (currentIndex, totalCount, imageData) => {
           setGeneratedPagesCount(currentIndex + 1);
           
-          // Store first image when it's ready
-          if (currentIndex === 0 && generatedImages[0] && !firstGeneratedImage) {
-            setFirstGeneratedImage(generatedImages[0]);
+          // Store first image when it's ready (now we have actual imageData in callback)
+          if (currentIndex === 0 && imageData && !firstGeneratedImage) {
+            setFirstGeneratedImage(imageData);
           }
         }
       );
 
       // Mark all images as generated
       setAllImagesGenerated(true);
-      setFirstGeneratedImage(generatedImages[0]);
+      // Ensure first image is set (fallback in case callback didn't catch it)
+      if (!firstGeneratedImage && generatedImages[0]) {
+        setFirstGeneratedImage(generatedImages[0]);
+      }
 
       // 3. Pre-generate color palettes for each page
       const pagesWithVariants = await Promise.all(
@@ -225,19 +228,7 @@ export default function CreateBookScreen({ navigation }) {
     );
   }
 
-  if (step === 'generating') {
-    return (
-      <View style={[styles.container, styles.centerContent]}>
-        <ActivityIndicator size="large" color="#FF6B9D" style={{ marginBottom: 24 }} />
-        <Text style={styles.subtitle}>Creating your book...</Text>
-        <Text style={styles.progressText}>{generationProgress}</Text>
-        <Text style={styles.tipText}>
-          💡 This generates 10 unique pages with 6 color palettes each
-        </Text>
-      </View>
-    );
-  }
-
+  // Fallback (should not reach here since generating step returns early)
   return null;
 }
 

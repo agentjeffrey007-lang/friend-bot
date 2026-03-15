@@ -10,18 +10,16 @@ const GEMINI_API_KEY = process.env.GEMINI_API_KEY || 'AIzaSyDRuyRAs2JOJJYOp-oo5n
  * 
  * @param {string} prompt - Description of what to generate
  * @param {number} count - Number of images to generate (default 10)
- * @param {function} onProgress - Callback for progress updates: (currentIndex, totalCount)
+ * @param {function} onProgress - Callback for progress updates: (currentIndex, totalCount, imageData)
  * @returns {Promise<string[]>} Array of image URIs (base64 data URLs)
  */
 export async function generateImage(prompt, count = 10, onProgress = null) {
   const images = [];
 
   for (let i = 0; i < count; i++) {
+    let imageData = null;
+    
     try {
-      // Notify progress
-      if (onProgress) {
-        onProgress(i, count);
-      }
 
       // Use Gemini 2.0 Flash with image generation
       const response = await axios.post(
@@ -61,7 +59,8 @@ Format: The image should be a single cohesive coloring page design, not divided 
         for (const part of candidate.content.parts) {
           if (part.inlineData) {
             const { mimeType, data } = part.inlineData;
-            images.push(`data:${mimeType};base64,${data}`);
+            imageData = `data:${mimeType};base64,${data}`;
+            images.push(imageData);
             imageFound = true;
             break;
           }
@@ -69,14 +68,22 @@ Format: The image should be a single cohesive coloring page design, not divided 
         
         // If no inline image, use placeholder
         if (!imageFound) {
-          images.push(generatePlaceholderSVG(i + 1, prompt, '16:9'));
+          imageData = generatePlaceholderSVG(i + 1, prompt, '16:9');
+          images.push(imageData);
         }
       } else {
-        images.push(generatePlaceholderSVG(i + 1, prompt, '16:9'));
+        imageData = generatePlaceholderSVG(i + 1, prompt, '16:9');
+        images.push(imageData);
       }
     } catch (error) {
       console.warn(`Image generation failed for page ${i + 1}:`, error.message);
-      images.push(generatePlaceholderSVG(i + 1, prompt, '16:9'));
+      imageData = generatePlaceholderSVG(i + 1, prompt, '16:9');
+      images.push(imageData);
+    }
+
+    // Notify progress with actual image data
+    if (onProgress) {
+      onProgress(i, count, imageData);
     }
 
     // Small delay between requests to avoid rate limiting

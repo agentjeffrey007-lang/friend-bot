@@ -1,10 +1,4 @@
 {
   "buildCommand": "cd nano-coloring-web && npm run build",
-  "outputDirectory": "nano-coloring-web/build",
-  "routes": [
-    {
-      "src": "/(.*)",
-      "dest": "nano-coloring-web/build/index.html"
-    }
-  ]
+  "outputDirectory": "nano-coloring-web/build"
 }

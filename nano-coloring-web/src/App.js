@@ -6,6 +6,8 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [images, setImages] = useState([]);
   const [selectedImageIdx, setSelectedImageIdx] = useState(0);
+  const [currentPage, setCurrentPage] = useState(0);
+  const [selectedColor, setSelectedColor] = useState('#FF6B9D');
 
   const generatePlaceholders = (count) => {
     return Array(count).fill().map((_, i) => 
@@ -16,13 +18,14 @@ export default function App() {
   const handleCreateBook = async () => {
     if (!userInput.trim()) return;
     setLoading(true);
-    // Simulate image generation
     setTimeout(() => {
       setImages(generatePlaceholders(10));
       setScreen('preview');
       setLoading(false);
     }, 1000);
   };
+
+  const colors = ['#000', '#FF6B9D', '#FFD700', '#00CED1', '#32CD32', '#FF8C00'];
 
   if (screen === 'menu') {
     return (
@@ -97,10 +100,6 @@ export default function App() {
   }
 
   if (screen === 'coloring') {
-    const colors = ['#000', '#FF6B9D', '#FFD700', '#00CED1', '#32CD32', '#FF8C00'];
-    const [currentPage, setCurrentPage] = useState(0);
-    const [selectedColor, setSelectedColor] = useState('#FF6B9D');
-
     return (
       <div style={{ minHeight: '100vh', padding: '20px', display: 'flex', flexDirection: 'column' }}>
         <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f9f9f9', borderRadius: '10px', marginBottom: '20px', overflow: 'auto' }}>

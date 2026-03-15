@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -6,83 +6,88 @@ import {
   TouchableOpacity,
   StyleSheet,
   Image,
-  ActivityIndicator,
+  Alert,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useFocusEffect } from '@react-navigation/native';
+import { loadBooks, deleteBook } from '../utils/storage';
 
 export default function MyBooksScreen({ navigation }) {
   const [books, setBooks] = useState([]);
-  const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      loadBooks();
-    });
-    return unsubscribe;
-  }, [navigation]);
-
-  const loadBooks = async () => {
-    try {
-      setLoading(true);
-      // Get all keys that start with 'book_'
-      const allKeys = await AsyncStorage.getAllKeys();
-      const bookKeys = allKeys.filter(key => key.startsWith('book_') && !key.includes('_page_'));
-      
-      const loadedBooks = [];
-      for (const key of bookKeys) {
-        const bookData = await AsyncStorage.getItem(key);
-        if (bookData) {
-          loadedBooks.push(JSON.parse(bookData));
-        }
-      }
-      
-      setBooks(loadedBooks);
-      setLoading(false);
-    } catch (error) {
-      console.error('Error loading books:', error);
-      setLoading(false);
-    }
-  };
-
-  const renderBook = ({ item, index }) => (
-    <TouchableOpacity
-      style={styles.bookCard}
-      onPress={() => navigation.navigate('Coloring', { book: item })}
-    >
-      <Image source={{ uri: item.images[0] }} style={styles.bookThumbnail} />
-      <View style={styles.bookInfo}>
-        <Text style={styles.bookTitle}>{item.title || `Book ${index + 1}`}</Text>
-        <Text style={styles.bookDescription}>{item.description || item.prompt}</Text>
-        <Text style={styles.bookMeta}>{item.images.length} pages</Text>
-      </View>
-    </TouchableOpacity>
+  useFocusEffect(
+    useCallback(() => {
+      loadBooks().then(setBooks);
+    }, [])
   );
 
-  if (loading) {
+  const handleDelete = (bookId, title) => {
+    Alert.alert('Delete Book', `Delete "${title}"?`, [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: async () => {
+          await deleteBook(bookId);
+          const updated = await loadBooks();
+          setBooks(updated);
+        },
+      },
+    ]);
+  };
+
+  const renderBook = ({ item }) => {
+    const thumbnail = item.images?.[0] || item.pages?.[0]?.image;
+    const pageCount = item.images?.length || item.pages?.length || 0;
     return (
-      <View style={[styles.container, styles.centerContent]}>
-        <ActivityIndicator size="large" color="#FF6B9D" />
-        <Text style={{ marginTop: 15, color: '#666' }}>Loading books...</Text>
-      </View>
+      <TouchableOpacity
+        style={styles.bookCard}
+        onPress={() => navigation.navigate('Coloring', { book: item })}
+        onLongPress={() => handleDelete(item.id, item.title)}
+      >
+        {thumbnail ? (
+          <Image source={{ uri: thumbnail }} style={styles.bookThumbnail} />
+        ) : (
+          <View style={[styles.bookThumbnail, styles.placeholderThumb]}>
+            <Text style={styles.placeholderEmoji}>📖</Text>
+          </View>
+        )}
+        <View style={styles.bookInfo}>
+          <Text style={styles.bookTitle} numberOfLines={1}>
+            {item.title || 'Untitled Book'}
+          </Text>
+          <Text style={styles.bookDescription} numberOfLines={2}>
+            {item.prompt || 'No description'}
+          </Text>
+          <View style={styles.bookMetaRow}>
+            <Text style={styles.bookMeta}>{pageCount} pages</Text>
+            {item.pages?.[0]?.colorVariants?.length > 0 && (
+              <Text style={styles.bookMeta}>
+                • {item.pages[0].colorVariants.length} palettes
+              </Text>
+            )}
+          </View>
+        </View>
+        <Text style={styles.chevron}>›</Text>
+      </TouchableOpacity>
     );
-  }
+  };
 
   return (
     <View style={styles.container}>
       {books.length === 0 ? (
         <View style={styles.emptyContainer}>
-          <Text style={styles.emptyIcon}>📚</Text>
+          <Text style={styles.emptyEmoji}>📚</Text>
           <Text style={styles.emptyText}>No books yet</Text>
-          <Text style={styles.emptySubtext}>Create your first coloring book!</Text>
+          <Text style={styles.emptySubtext}>
+            Create your first coloring book{'\n'}from the Create tab!
+          </Text>
         </View>
       ) : (
         <FlatList
           data={books}
           renderItem={renderBook}
-          keyExtractor={(_, idx) => idx.toString()}
+          keyExtractor={(item) => item.id || Math.random().toString()}
           contentContainerStyle={styles.listContainer}
-          refreshing={loading}
-          onRefresh={loadBooks}
         />
       )}
     </View>
@@ -98,59 +103,79 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  emptyEmoji: {
+    fontSize: 48,
+    marginBottom: 16,
   },
   emptyText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 10,
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#1a1a2e',
+    marginBottom: 8,
   },
   emptySubtext: {
-    fontSize: 14,
+    fontSize: 15,
     color: '#999',
-  },
-  emptyIcon: {
-    fontSize: 48,
-    marginBottom: 10,
-  },
-  centerContent: {
-    justifyContent: 'center',
-    alignItems: 'center',
+    textAlign: 'center',
+    lineHeight: 22,
   },
   listContainer: {
-    padding: 15,
+    padding: 16,
   },
   bookCard: {
-    backgroundColor: '#f9f9f9',
-    borderRadius: 10,
-    marginBottom: 15,
+    backgroundColor: '#fafafa',
+    borderRadius: 12,
+    marginBottom: 12,
     flexDirection: 'row',
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#eee',
+    borderColor: '#f0f0f0',
+    alignItems: 'center',
   },
   bookThumbnail: {
     width: 80,
     height: 100,
+    backgroundColor: '#f0f0f0',
+  },
+  placeholderThumb: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  placeholderEmoji: {
+    fontSize: 28,
   },
   bookInfo: {
     flex: 1,
-    padding: 15,
+    padding: 14,
     justifyContent: 'center',
   },
   bookTitle: {
     fontSize: 16,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 5,
+    fontWeight: '700',
+    color: '#1a1a2e',
+    marginBottom: 4,
   },
   bookDescription: {
-    fontSize: 12,
-    color: '#666',
-    marginBottom: 5,
+    fontSize: 13,
+    color: '#888',
+    marginBottom: 6,
+    lineHeight: 18,
+  },
+  bookMetaRow: {
+    flexDirection: 'row',
+    gap: 6,
   },
   bookMeta: {
     fontSize: 11,
-    color: '#999',
+    color: '#bbb',
+    fontWeight: '600',
+  },
+  chevron: {
+    fontSize: 24,
+    color: '#ccc',
+    paddingRight: 14,
+    fontWeight: '300',
   },
 });

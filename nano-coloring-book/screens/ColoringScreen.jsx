@@ -1,12 +1,4 @@
-/**
- * Coloring Screen MVP — Interactive Palette Selection
- * 
- * For MVP: Images are pre-generated with color variants during book creation.
- * User can switch between palettes instantly (no regeneration).
- * 
- * Phase 2: Add Skia canvas for actual drawing on top of images
- */
-import React, { useState, useEffect } from 'react';
+import React, { useState, useRef, useCallback } from 'react';
 import {
   View,
   Text,
@@ -14,275 +6,248 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Alert,
-  ActivityIndicator,
+  PanResponder,
   Dimensions,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const { width: screenWidth } = Dimensions.get('window');
+const { width: SCREEN_WIDTH } = Dimensions.get('window');
+const CANVAS_SIZE = SCREEN_WIDTH - 40;
 
 export default function ColoringScreen({ route, navigation }) {
-  const { book, pageIndex: initialPageIndex = 0 } = route.params;
-  const [currentPageIndex, setCurrentPageIndex] = useState(initialPageIndex);
-  const [currentPaletteIndex, setCurrentPaletteIndex] = useState(0);
-  const [saveLoading, setSaveLoading] = useState(false);
-  const [drawing, setDrawing] = useState(null);
+  const { book } = route.params;
+  const pages = book.pages || book.images.map((img) => ({ image: img, colorVariants: [] }));
+  const [currentPageIdx, setCurrentPageIdx] = useState(0);
+  const [selectedColor, setSelectedColor] = useState('#FF6B9D');
+  const [selectedPaletteIdx, setSelectedPaletteIdx] = useState(0);
+  const [brushSize, setBrushSize] = useState(8);
+  const [strokes, setStrokes] = useState({}); // per-page strokes: { [pageIdx]: [{ points, color, size }] }
+  const [currentStroke, setCurrentStroke] = useState(null);
 
-  // Color palettes for display
-  const COLOR_PALETTES = [
-    {
-      name: 'Default',
-      displayName: '🎨 Default',
-      colors: ['#FF6B9D', '#FFD700', '#00CED1', '#32CD32', '#FF8C00', '#8B00FF'],
-    },
-    {
-      name: 'Pastel',
-      displayName: '🌸 Pastel',
-      colors: ['#FFB3BA', '#FFCCCB', '#FFFFBA', '#BAE1FF', '#BAC2FF', '#E0BBE4'],
-    },
-    {
-      name: 'Vibrant',
-      displayName: '⚡ Vibrant',
-      colors: ['#FF0000', '#FF7F00', '#FFFF00', '#00FF00', '#0000FF', '#FF1493'],
-    },
-    {
-      name: 'Ocean',
-      displayName: '🌊 Ocean',
-      colors: ['#001F3F', '#0074D9', '#007EFF', '#B6E3FF', '#004E89', '#4DA6D6'],
-    },
-    {
-      name: 'Sunset',
-      displayName: '🌅 Sunset',
-      colors: ['#FF6B35', '#F7931E', '#FDB833', '#F37335', '#FF4500', '#EE964B'],
-    },
-    {
-      name: 'Forest',
-      displayName: '🌲 Forest',
-      colors: ['#134E5E', '#1B998B', '#2ECC71', '#27AE60', '#117A65', '#52B788'],
-    },
+  // Use refs to capture current values in PanResponder
+  const colorRef = useRef(selectedColor);
+  const brushSizeRef = useRef(brushSize);
+  const pageIdxRef = useRef(currentPageIdx);
+  const strokeRef = useRef(null);
+
+  // Keep refs in sync with state
+  React.useEffect(() => {
+    colorRef.current = selectedColor;
+  }, [selectedColor]);
+
+  React.useEffect(() => {
+    brushSizeRef.current = brushSize;
+  }, [brushSize]);
+
+  React.useEffect(() => {
+    pageIdxRef.current = currentPageIdx;
+  }, [currentPageIdx]);
+
+  React.useEffect(() => {
+    strokeRef.current = currentStroke;
+  }, [currentStroke]);
+
+  const currentPage = pages[currentPageIdx];
+  const currentImage = currentPage?.image || (book.images && book.images[currentPageIdx]);
+  const currentVariants = currentPage?.colorVariants || [];
+  const selectedPalette = currentVariants[selectedPaletteIdx];
+  const colors = selectedPalette?.colors || [
+    '#FF6B9D', '#FFD700', '#00CED1', '#32CD32', '#FF8C00', '#8B00FF',
+    '#FF4757', '#2ED573', '#1E90FF', '#FFA502',
   ];
 
-  const currentPage = book.pages[currentPageIndex];
-  const currentImage = currentPage?.colorVariants?.[currentPaletteIndex] || currentPage?.baseImage;
+  const pageStrokes = strokes[currentPageIdx] || [];
 
-  useEffect(() => {
-    loadPageState();
-  }, [currentPageIndex]);
+  // PanResponder for drawing - now reads from refs instead of closure
+  const panResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: (evt) => {
+        const { locationX, locationY } = evt.nativeEvent;
+        const newStroke = {
+          points: [{ x: locationX, y: locationY }],
+          color: colorRef.current,
+          size: brushSizeRef.current,
+        };
+        strokeRef.current = newStroke;
+        setCurrentStroke(newStroke);
+      },
+      onPanResponderMove: (evt) => {
+        const { locationX, locationY } = evt.nativeEvent;
+        if (strokeRef.current) {
+          const updatedStroke = {
+            ...strokeRef.current,
+            points: [...strokeRef.current.points, { x: locationX, y: locationY }],
+          };
+          strokeRef.current = updatedStroke;
+          setCurrentStroke(updatedStroke);
+        }
+      },
+      onPanResponderRelease: () => {
+        if (strokeRef.current) {
+          setStrokes((prev) => ({
+            ...prev,
+            [pageIdxRef.current]: [...(prev[pageIdxRef.current] || []), strokeRef.current],
+          }));
+          strokeRef.current = null;
+          setCurrentStroke(null);
+        }
+      },
+    })
+  ).current;
 
-  const loadPageState = async () => {
-    try {
-      const key = `coloring_${book.id}_page_${currentPageIndex}`;
-      const state = await AsyncStorage.getItem(key);
-      if (state) {
-        setDrawing(JSON.parse(state));
-      }
-    } catch (error) {
-      console.error('Error loading page state:', error);
-    }
-  };
-
-  const savePageState = async () => {
-    try {
-      setSaveLoading(true);
-      const key = `coloring_${book.id}_page_${currentPageIndex}`;
-      const state = {
-        pageIndex: currentPageIndex,
-        paletteIndex: currentPaletteIndex,
-        drawing: drawing,
-        timestamp: new Date().toISOString(),
+  const handleUndo = () => {
+    setStrokes((prev) => {
+      const pageArr = prev[currentPageIdx] || [];
+      if (pageArr.length === 0) return prev;
+      return {
+        ...prev,
+        [currentPageIdx]: pageArr.slice(0, -1),
       };
-      await AsyncStorage.setItem(key, JSON.stringify(state));
-      
-      // Also mark book as edited
-      const bookData = JSON.parse(await AsyncStorage.getItem(`book_${book.id}`));
-      if (bookData) {
-        bookData.lastEdited = new Date().toISOString();
-        bookData.coloredPages = Math.max(bookData.coloredPages || 0, currentPageIndex + 1);
-        await AsyncStorage.setItem(`book_${book.id}`, JSON.stringify(bookData));
-      }
-      
-      setSaveLoading(false);
-    } catch (error) {
-      console.error('Error saving page:', error);
-      setSaveLoading(false);
-    }
+    });
   };
 
-  const handleNextPage = () => {
-    if (currentPageIndex < book.pages.length - 1) {
-      savePageState();
-      setCurrentPageIndex(currentPageIndex + 1);
-      setCurrentPaletteIndex(0); // Reset palette on new page
-    }
+  const handleClearPage = () => {
+    setStrokes((prev) => ({
+      ...prev,
+      [currentPageIdx]: [],
+    }));
   };
 
-  const handlePrevPage = () => {
-    if (currentPageIndex > 0) {
-      savePageState();
-      setCurrentPageIndex(currentPageIndex - 1);
-      setCurrentPaletteIndex(0);
-    }
-  };
-
-  const handleSwitchPalette = (paletteIdx) => {
-    setCurrentPaletteIndex(paletteIdx);
-    // INSTANT: No regeneration needed because variants were pre-generated during book creation
-  };
-
-  const handleFinishColoring = async () => {
-    await savePageState();
-    Alert.alert(
-      'Coloring Session Saved',
-      'Your progress has been saved. You can continue coloring anytime!',
-      [
-        {
-          text: 'Continue',
-          onPress: () => {}, // Stay on screen
-        },
-        {
-          text: 'Back to Books',
-          onPress: () => navigation.goBack(),
-        },
-        {
-          text: 'Go to Checkout',
-          onPress: () => {
-            navigation.navigate('Checkout', { book });
-          },
-        },
-      ]
+  const renderStrokes = (strokeList) => {
+    // We render strokes as colored dots/lines using absolute positioned views
+    // This is a simplified canvas - for production, use react-native-svg or react-native-canvas
+    return strokeList.map((stroke, si) =>
+      stroke.points.map((point, pi) => (
+        <View
+          key={`${si}-${pi}`}
+          style={{
+            position: 'absolute',
+            left: point.x - stroke.size / 2,
+            top: point.y - stroke.size / 2,
+            width: stroke.size,
+            height: stroke.size,
+            borderRadius: stroke.size / 2,
+            backgroundColor: stroke.color,
+            opacity: 0.7,
+          }}
+        />
+      ))
     );
   };
 
-  const handleClear = () => {
-    Alert.alert('Clear Drawing?', 'This will erase your work on this page.', [
-      { text: 'Cancel' },
-      {
-        text: 'Clear',
-        onPress: () => setDrawing(null),
-        style: 'destructive',
-      },
-    ]);
-  };
-
-  const palette = COLOR_PALETTES[currentPaletteIndex];
-
   return (
     <View style={styles.container}>
-      {/* Image Display */}
-      <View style={styles.imageContainer}>
-        <Image
-          source={{ uri: currentImage }}
-          style={styles.image}
-          resizeMode="contain"
-        />
+      {/* Canvas area */}
+      <View style={styles.canvasWrapper}>
+        <View style={styles.canvasContainer} {...panResponder.panHandlers}>
+          <Image
+            source={{ uri: currentImage }}
+            style={styles.canvasImage}
+            resizeMode="contain"
+          />
+          {/* Rendered strokes */}
+          {renderStrokes(pageStrokes)}
+          {currentStroke && renderStrokes([currentStroke])}
+        </View>
       </View>
 
-      {/* Palette Selection Section */}
-      <View style={styles.paletteSection}>
-        <Text style={styles.sectionTitle}>Choose a color palette:</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.palettesScroll}>
-          {COLOR_PALETTES.map((p, idx) => (
+      {/* Palette selector */}
+      {currentVariants.length > 0 && (
+        <View style={styles.paletteSelector}>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            {currentVariants.map((variant, idx) => (
+              <TouchableOpacity
+                key={idx}
+                style={[
+                  styles.paletteTab,
+                  selectedPaletteIdx === idx && styles.paletteTabActive,
+                ]}
+                onPress={() => {
+                  setSelectedPaletteIdx(idx);
+                  setSelectedColor(variant.colors[0]);
+                }}
+              >
+                <Text
+                  style={[
+                    styles.paletteTabText,
+                    selectedPaletteIdx === idx && styles.paletteTabTextActive,
+                  ]}
+                >
+                  {variant.name}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        </View>
+      )}
+
+      {/* Color picker */}
+      <View style={styles.colorSection}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.colorRow}>
+          {colors.map((color) => (
             <TouchableOpacity
-              key={idx}
+              key={color}
               style={[
-                styles.paletteCard,
-                currentPaletteIndex === idx && styles.paletteCardActive,
+                styles.colorCircle,
+                { backgroundColor: color },
+                selectedColor === color && styles.colorCircleSelected,
               ]}
-              onPress={() => handleSwitchPalette(idx)}
-              activeOpacity={0.7}
-            >
-              <View style={styles.paletteColorGrid}>
-                {p.colors.map((color, cidx) => (
-                  <View
-                    key={cidx}
-                    style={[
-                      styles.paletteColorDot,
-                      { backgroundColor: color },
-                    ]}
-                  />
-                ))}
-              </View>
-              <Text style={[
-                styles.paletteName,
-                currentPaletteIndex === idx && styles.paletteNameActive,
-              ]}>
-                {p.displayName}
-              </Text>
-            </TouchableOpacity>
+              onPress={() => setSelectedColor(color)}
+            />
           ))}
         </ScrollView>
       </View>
 
-      {/* Colors Available for Selected Palette */}
-      <View style={styles.colorsSection}>
-        <Text style={styles.sectionTitle}>Colors to use:</Text>
-        <View style={styles.colorsGrid}>
-          {palette.colors.map((color, idx) => (
-            <View key={idx} style={[styles.colorSwatch, { backgroundColor: color }]} />
-          ))}
-        </View>
-        <Text style={styles.colorNote}>💡 Tap any color in the palette above to select it</Text>
+      {/* Brush size */}
+      <View style={styles.brushRow}>
+        {[4, 8, 14, 22].map((size) => (
+          <TouchableOpacity
+            key={size}
+            style={[styles.brushOption, brushSize === size && styles.brushOptionActive]}
+            onPress={() => setBrushSize(size)}
+          >
+            <View
+              style={{
+                width: size,
+                height: size,
+                borderRadius: size / 2,
+                backgroundColor: selectedColor,
+              }}
+            />
+          </TouchableOpacity>
+        ))}
+        <View style={{ flex: 1 }} />
+        <TouchableOpacity style={styles.toolButton} onPress={handleUndo}>
+          <Text style={styles.toolButtonText}>↩️ Undo</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={styles.toolButton} onPress={handleClearPage}>
+          <Text style={styles.toolButtonText}>🗑 Clear</Text>
+        </TouchableOpacity>
       </View>
 
-      {/* Page Navigation */}
-      <View style={styles.navigationSection}>
+      {/* Page navigation */}
+      <View style={styles.navContainer}>
         <TouchableOpacity
-          style={[styles.navButton, currentPageIndex === 0 && styles.navButtonDisabled]}
-          onPress={handlePrevPage}
-          disabled={currentPageIndex === 0}
+          style={[styles.navButton, currentPageIdx === 0 && styles.navButtonDisabled]}
+          onPress={() => setCurrentPageIdx(Math.max(0, currentPageIdx - 1))}
+          disabled={currentPageIdx === 0}
         >
           <Text style={styles.navButtonText}>← Prev</Text>
         </TouchableOpacity>
-
-        <View style={styles.pageInfo}>
-          <Text style={styles.pageIndicator}>
-            Page {currentPageIndex + 1} of {book.pages.length}
-          </Text>
-          <Text style={styles.paletteIndicator}>
-            Palette: {palette.name}
-          </Text>
-        </View>
-
+        <Text style={styles.pageIndicator}>
+          {currentPageIdx + 1} / {pages.length}
+        </Text>
         <TouchableOpacity
           style={[
             styles.navButton,
-            currentPageIndex === book.pages.length - 1 && styles.navButtonDisabled,
+            currentPageIdx >= pages.length - 1 && styles.navButtonDisabled,
           ]}
-          onPress={handleNextPage}
-          disabled={currentPageIndex === book.pages.length - 1}
+          onPress={() => setCurrentPageIdx(Math.min(pages.length - 1, currentPageIdx + 1))}
+          disabled={currentPageIdx >= pages.length - 1}
         >
           <Text style={styles.navButtonText}>Next →</Text>
         </TouchableOpacity>
-      </View>
-
-      {/* Action Buttons */}
-      <View style={styles.actionSection}>
-        <TouchableOpacity
-          style={[styles.actionButton, styles.clearButton]}
-          onPress={handleClear}
-        >
-          <Text style={styles.clearButtonText}>🧹 Clear</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[styles.actionButton, styles.saveButton]}
-          onPress={handleFinishColoring}
-          disabled={saveLoading}
-        >
-          {saveLoading ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <Text style={styles.saveButtonText}>✅ Save Progress</Text>
-          )}
-        </TouchableOpacity>
-      </View>
-
-      {/* Note */}
-      <View style={styles.noteBox}>
-        <Text style={styles.noteText}>
-          ℹ️ All color palettes are pre-loaded for instant switching. Your drawing progress is auto-saved.
-        </Text>
       </View>
     </View>
   );
@@ -293,182 +258,131 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
-  imageContainer: {
-    height: screenWidth * 0.6,
-    backgroundColor: '#f9f9f9',
+  canvasWrapper: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
+    padding: 20,
   },
-  image: {
-    width: screenWidth - 20,
-    height: '100%',
-  },
-
-  paletteSection: {
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    backgroundColor: '#fafafa',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  sectionTitle: {
-    fontSize: 13,
-    fontWeight: '600',
-    color: '#666',
-    marginBottom: 10,
-  },
-  palettesScroll: {
-    marginBottom: 5,
-  },
-  paletteCard: {
-    marginRight: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: 10,
-    backgroundColor: '#fff',
-    borderWidth: 2,
-    borderColor: '#eee',
-    alignItems: 'center',
-  },
-  paletteCardActive: {
-    borderColor: '#FF6B9D',
-    backgroundColor: '#FFF5F8',
-  },
-  paletteColorGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    width: 70,
-    gap: 3,
-    marginBottom: 6,
-  },
-  paletteColorDot: {
-    width: 13,
-    height: 13,
-    borderRadius: 2,
-  },
-  paletteName: {
-    fontSize: 11,
-    fontWeight: '500',
-    color: '#666',
-  },
-  paletteNameActive: {
-    color: '#FF6B9D',
-    fontWeight: '700',
-  },
-
-  colorsSection: {
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    backgroundColor: '#fff',
-  },
-  colorsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 8,
-  },
-  colorSwatch: {
-    width: (screenWidth - 50) / 4,
-    height: (screenWidth - 50) / 4,
+  canvasContainer: {
+    width: CANVAS_SIZE,
+    height: CANVAS_SIZE,
+    backgroundColor: '#fefefe',
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#ddd',
+    borderColor: '#eee',
+    overflow: 'hidden',
   },
-  colorNote: {
+  canvasImage: {
+    width: '100%',
+    height: '100%',
+  },
+  paletteSelector: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  paletteTab: {
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: '#f0f0f0',
+    marginRight: 8,
+  },
+  paletteTabActive: {
+    backgroundColor: '#FF6B9D',
+  },
+  paletteTabText: {
     fontSize: 12,
-    color: '#999',
-    fontStyle: 'italic',
-    textAlign: 'center',
+    fontWeight: '600',
+    color: '#666',
   },
-
-  navigationSection: {
+  paletteTabTextActive: {
+    color: '#fff',
+  },
+  colorSection: {
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  colorRow: {
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  colorCircle: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: '#e0e0e0',
+  },
+  colorCircleSelected: {
+    borderColor: '#333',
+    borderWidth: 3,
+    transform: [{ scale: 1.15 }],
+  },
+  brushRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-    backgroundColor: '#fafafa',
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  navButton: {
     paddingHorizontal: 12,
     paddingVertical: 8,
+    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#f0f0f0',
+  },
+  brushOption: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#e0e0e0',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  brushOptionActive: {
+    borderColor: '#FF6B9D',
+    borderWidth: 2,
+    backgroundColor: '#fff0f5',
+  },
+  toolButton: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: '#f5f5f5',
+  },
+  toolButtonText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#666',
+  },
+  navContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    backgroundColor: '#fafafa',
+  },
+  navButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     backgroundColor: '#FF6B9D',
-    borderRadius: 6,
+    borderRadius: 8,
   },
   navButtonDisabled: {
     opacity: 0.3,
   },
   navButtonText: {
     color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  pageInfo: {
-    alignItems: 'center',
+    fontWeight: '700',
+    fontSize: 13,
   },
   pageIndicator: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#333',
-  },
-  paletteIndicator: {
-    fontSize: 11,
-    color: '#999',
-    marginTop: 2,
-  },
-
-  actionSection: {
-    flexDirection: 'row',
-    gap: 10,
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    backgroundColor: '#fff',
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
-  },
-  actionButton: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  clearButton: {
-    backgroundColor: '#f0f0f0',
-    borderWidth: 1,
-    borderColor: '#ddd',
-  },
-  clearButtonText: {
-    color: '#666',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  saveButton: {
-    backgroundColor: '#FF6B9D',
-  },
-  saveButtonText: {
-    color: '#fff',
-    fontSize: 12,
+    fontSize: 15,
+    color: '#555',
     fontWeight: '700',
-  },
-
-  noteBox: {
-    marginHorizontal: 15,
-    marginBottom: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: '#F0F7FF',
-    borderLeftWidth: 3,
-    borderLeftColor: '#0074D9',
-    borderRadius: 4,
-  },
-  noteText: {
-    fontSize: 11,
-    color: '#333',
-    fontStyle: 'italic',
   },
 });

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,7 +9,8 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { generateContextualQuestions, synthesizePrompt } from '../utils/promptEngine';
-import { generateImage } from '../utils/nanoBananaAPI';
+import { generateImage, generateColorVariants } from '../utils/nanoBananaAPI';
+import { saveBook } from '../utils/storage';
 
 export default function CreateBookScreen({ navigation }) {
   const [step, setStep] = useState('menu'); // menu, input, questions, chat, generating
@@ -19,13 +20,11 @@ export default function CreateBookScreen({ navigation }) {
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
   const [chatMessage, setChatMessage] = useState('');
   const [loading, setLoading] = useState(false);
-  const [images, setImages] = useState([]);
+  const [generationProgress, setGenerationProgress] = useState('');
 
   const handleCreateBook = async () => {
     if (!userInput.trim()) return;
     setLoading(true);
-
-    // Generate contextual questions
     const qs = await generateContextualQuestions(userInput);
     setQuestions(qs);
     setCurrentQuestionIndex(0);
@@ -36,7 +35,6 @@ export default function CreateBookScreen({ navigation }) {
   const handleAnswerQuestion = (answer) => {
     const newAnswers = { ...answers, [currentQuestionIndex]: answer };
     setAnswers(newAnswers);
-
     if (currentQuestionIndex < questions.length - 1) {
       setCurrentQuestionIndex(currentQuestionIndex + 1);
     } else {
@@ -49,62 +47,69 @@ export default function CreateBookScreen({ navigation }) {
   };
 
   const handleGenerateBook = async () => {
-    if (!chatMessage.trim() && Object.keys(answers).length === 0) return;
-
     setLoading(true);
     setStep('generating');
 
-    // Synthesize final prompt from answers + chat
-    const finalPrompt = await synthesizePrompt(userInput, answers, chatMessage);
+    try {
+      // 1. Synthesize final prompt
+      setGenerationProgress('Crafting your perfect prompt...');
+      const finalPrompt = await synthesizePrompt(userInput, answers, chatMessage);
 
-    // Generate 10 images via Nano Banana
-    const generatedImages = await generateImage(finalPrompt, 10);
-    
-    // CRITICAL: Generate 5+ color palette variants for EACH image in parallel
-    // This happens during creation so coloring screen can switch instantly
-    const imageVariants = await Promise.all(
-      generatedImages.map(async (image, idx) => {
-        const colorPalettes = [
-          'default colors',
-          'pastel soft colors',
-          'vibrant bright colors',
-          'ocean blue colors',
-          'sunset orange colors',
-          'forest green colors',
-        ];
-        
-        // Generate variants for each palette in parallel
-        const variants = await Promise.all(
-          colorPalettes.map((paletteStyle) =>
-            generateImage(
-              `${finalPrompt}. Color style: ${paletteStyle}. Apply these colors to the image. Generate the same coloring page design but with ${paletteStyle} applied.`,
-              1
-            )
-          )
-        );
-        
-        return {
-          base: image,
-          variants: variants.flat(),
-          paletteNames: colorPalettes,
-        };
-      })
-    );
+      // 2. Generate base images (10 pages)
+      setGenerationProgress('Drawing your coloring pages... (this may take a minute)');
+      const PAGE_COUNT = 10;
+      const generatedImages = await generateImage(finalPrompt, PAGE_COUNT);
 
-    setImages(imageVariants);
-    setLoading(false);
-    navigation.navigate('Preview', { images: imageVariants, prompt: finalPrompt });
+      // 3. Pre-generate color palettes for each page (CRITICAL)
+      setGenerationProgress('Creating color palettes for each page...');
+      const pagesWithVariants = await Promise.all(
+        generatedImages.map(async (img, idx) => {
+          const variants = await generateColorVariants(img, idx);
+          return {
+            image: img,
+            colorVariants: variants,
+          };
+        })
+      );
+
+      // 4. Save book to storage
+      setGenerationProgress('Saving your book...');
+      const book = await saveBook({
+        title: userInput,
+        prompt: finalPrompt,
+        pages: pagesWithVariants,
+        images: generatedImages, // flat array for backward compat
+      });
+
+      setLoading(false);
+
+      // Navigate to preview with the full data
+      navigation.navigate('Preview', {
+        images: generatedImages,
+        pages: pagesWithVariants,
+        prompt: finalPrompt,
+        bookId: book.id,
+      });
+    } catch (error) {
+      console.error('Generation error:', error);
+      setLoading(false);
+      setStep('chat');
+      // Could show an alert here
+    }
   };
 
   if (step === 'menu') {
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>Create Your Coloring Book</Text>
-        <TouchableOpacity
-          style={styles.button}
-          onPress={() => setStep('input')}
-        >
-          <Text style={styles.buttonText}>✨ Create Book</Text>
+        <View style={styles.heroSection}>
+          <Text style={styles.heroEmoji}>🎨</Text>
+          <Text style={styles.title}>Create Your{'\n'}Coloring Book</Text>
+          <Text style={styles.heroSubtitle}>
+            AI-powered custom coloring pages{'\n'}just for you
+          </Text>
+        </View>
+        <TouchableOpacity style={styles.button} onPress={() => setStep('input')}>
+          <Text style={styles.buttonText}>✨ Start Creating</Text>
         </TouchableOpacity>
       </View>
     );
@@ -114,19 +119,27 @@ export default function CreateBookScreen({ navigation }) {
     return (
       <View style={styles.container}>
         <Text style={styles.subtitle}>What would you like to color?</Text>
+        <Text style={styles.description}>
+          Describe your dream coloring book theme
+        </Text>
         <TextInput
           style={styles.input}
           placeholder="e.g., Turtles, Space adventure, My dog..."
           value={userInput}
           onChangeText={setUserInput}
           placeholderTextColor="#999"
+          autoFocus
         />
         <TouchableOpacity
-          style={[styles.button, { opacity: userInput.trim() ? 1 : 0.5 }]}
+          style={[styles.button, !userInput.trim() && styles.buttonDisabled]}
           onPress={handleCreateBook}
-          disabled={!userInput.trim()}
+          disabled={!userInput.trim() || loading}
         >
-          <Text style={styles.buttonText}>{loading ? 'Loading...' : 'Next'}</Text>
+          {loading ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.buttonText}>Next →</Text>
+          )}
         </TouchableOpacity>
       </View>
     );
@@ -136,8 +149,11 @@ export default function CreateBookScreen({ navigation }) {
     const question = questions[currentQuestionIndex];
     return (
       <View style={styles.container}>
+        <Text style={styles.stepIndicator}>
+          Question {currentQuestionIndex + 1} of {questions.length}
+        </Text>
         <Text style={styles.subtitle}>{question.text}</Text>
-        <ScrollView style={styles.optionsContainer}>
+        <ScrollView style={styles.optionsContainer} showsVerticalScrollIndicator={false}>
           {question.options.map((option, idx) => (
             <TouchableOpacity
               key={idx}
@@ -149,36 +165,44 @@ export default function CreateBookScreen({ navigation }) {
           ))}
         </ScrollView>
         <TouchableOpacity style={styles.skipButton} onPress={handleSkipToChat}>
-          <Text style={styles.skipText}>Skip to Chat</Text>
+          <Text style={styles.skipText}>Skip to final details →</Text>
         </TouchableOpacity>
       </View>
     );
   }
 
-  if (step === 'chat' || step === 'generating') {
+  if (step === 'chat') {
     return (
       <View style={styles.container}>
-        <Text style={styles.subtitle}>Final Touches</Text>
-        <Text style={styles.description}>
-          Any final details? (Optional)
-        </Text>
+        <Text style={styles.subtitle}>Any final touches?</Text>
+        <Text style={styles.description}>Optional — add any extra details or just generate!</Text>
         <TextInput
-          style={[styles.input, { minHeight: 100 }]}
-          placeholder="e.g., Add more backgrounds, make it magical, etc."
+          style={[styles.input, styles.multilineInput]}
+          placeholder="e.g., Add more backgrounds, make it magical..."
           value={chatMessage}
           onChangeText={setChatMessage}
           placeholderTextColor="#999"
           multiline
         />
-        <TouchableOpacity
-          style={[styles.button, { opacity: loading ? 0.5 : 1 }]}
-          onPress={handleGenerateBook}
-          disabled={loading}
-        >
-          <Text style={styles.buttonText}>
-            {loading ? 'Creating...' : '🎨 Generate Book'}
-          </Text>
+        <TouchableOpacity style={styles.button} onPress={handleGenerateBook}>
+          <Text style={styles.buttonText}>🎨 Generate Book</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={styles.skipButton} onPress={() => setStep('questions')}>
+          <Text style={styles.skipText}>← Back to questions</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }
+
+  if (step === 'generating') {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color="#FF6B9D" style={{ marginBottom: 24 }} />
+        <Text style={styles.subtitle}>Creating your book...</Text>
+        <Text style={styles.progressText}>{generationProgress}</Text>
+        <Text style={styles.tipText}>
+          💡 This generates 10 unique pages with 6 color palettes each
+        </Text>
       </View>
     );
   }
@@ -189,57 +213,99 @@ export default function CreateBookScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: 20,
+    padding: 24,
     backgroundColor: '#fff',
     justifyContent: 'center',
   },
+  centerContent: {
+    alignItems: 'center',
+  },
+  heroSection: {
+    alignItems: 'center',
+    marginBottom: 48,
+  },
+  heroEmoji: {
+    fontSize: 64,
+    marginBottom: 16,
+  },
   title: {
-    fontSize: 28,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 40,
+    fontSize: 32,
+    fontWeight: '800',
+    color: '#1a1a2e',
     textAlign: 'center',
+    lineHeight: 40,
+    marginBottom: 12,
+  },
+  heroSubtitle: {
+    fontSize: 16,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 22,
   },
   subtitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#333',
-    marginBottom: 20,
+    fontSize: 22,
+    fontWeight: '700',
+    color: '#1a1a2e',
+    marginBottom: 8,
     textAlign: 'center',
   },
   description: {
     fontSize: 14,
-    color: '#666',
-    marginBottom: 15,
+    color: '#888',
+    marginBottom: 24,
     textAlign: 'center',
+  },
+  stepIndicator: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#FF6B9D',
+    textAlign: 'center',
+    marginBottom: 16,
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
   input: {
     borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 10,
-    padding: 15,
+    borderColor: '#e0e0e0',
+    borderRadius: 12,
+    padding: 16,
     fontSize: 16,
     marginBottom: 20,
-    backgroundColor: '#f9f9f9',
+    backgroundColor: '#fafafa',
+    color: '#333',
+  },
+  multilineInput: {
+    minHeight: 100,
+    textAlignVertical: 'top',
   },
   button: {
     backgroundColor: '#FF6B9D',
-    padding: 15,
-    borderRadius: 10,
+    padding: 16,
+    borderRadius: 12,
     alignItems: 'center',
+    shadowColor: '#FF6B9D',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 4,
+  },
+  buttonDisabled: {
+    opacity: 0.4,
+    shadowOpacity: 0,
   },
   buttonText: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: 'bold',
+    fontSize: 17,
+    fontWeight: '700',
   },
   optionsContainer: {
-    marginBottom: 20,
+    marginBottom: 16,
+    maxHeight: 300,
   },
   optionButton: {
-    backgroundColor: '#f0f0f0',
-    padding: 15,
-    borderRadius: 8,
+    backgroundColor: '#f8f8fc',
+    padding: 16,
+    borderRadius: 12,
     marginBottom: 10,
     borderLeftWidth: 4,
     borderLeftColor: '#FF6B9D',
@@ -247,14 +313,29 @@ const styles = StyleSheet.create({
   optionText: {
     fontSize: 16,
     color: '#333',
+    fontWeight: '500',
   },
   skipButton: {
-    padding: 10,
+    padding: 12,
     alignItems: 'center',
+    marginTop: 8,
   },
   skipText: {
     color: '#FF6B9D',
     fontSize: 14,
-    textDecorationLine: 'underline',
+    fontWeight: '600',
+  },
+  progressText: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  tipText: {
+    fontSize: 13,
+    color: '#aaa',
+    textAlign: 'center',
+    marginTop: 32,
+    paddingHorizontal: 40,
   },
 });

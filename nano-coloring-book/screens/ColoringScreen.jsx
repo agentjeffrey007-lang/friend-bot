@@ -1,4 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react';
+/**
+ * Coloring Screen MVP — Interactive Palette Selection
+ * 
+ * For MVP: Images are pre-generated with color variants during book creation.
+ * User can switch between palettes instantly (no regeneration).
+ * 
+ * Phase 2: Add Skia canvas for actual drawing on top of images
+ */
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,109 +15,92 @@ import {
   StyleSheet,
   ScrollView,
   Alert,
-  PanResponder,
-  Animated,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
-import { Canvas, useImage, ImageSVG } from '@shopify/react-native-skia';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-/**
- * Enhanced Coloring Screen with:
- * - Interactive drawing canvas
- * - Pre-generated color palette variants (instant switching)
- * - Save/load drawing state
- * - Color picker with preset palettes
- */
-export default function ColoringScreen({ route, navigation }) {
-  const { book } = route.params;
-  const [currentPageIdx, setCurrentPageIdx] = useState(0);
-  const [selectedColor, setSelectedColor] = useState('#FF6B9D');
-  const [brushSize, setBrushSize] = useState(5);
-  const [isDrawing, setIsDrawing] = useState(false);
-  const [colorPaletteIdx, setColorPaletteIdx] = useState(0);
-  const [saveLoading, setSaveLoading] = useState(false);
-  const canvasRef = useRef(null);
+const { width: screenWidth } = Dimensions.get('window');
 
-  // Pre-defined color palettes (generated during book creation)
-  const colorPalettes = [
+export default function ColoringScreen({ route, navigation }) {
+  const { book, pageIndex: initialPageIndex = 0 } = route.params;
+  const [currentPageIndex, setCurrentPageIndex] = useState(initialPageIndex);
+  const [currentPaletteIndex, setCurrentPaletteIndex] = useState(0);
+  const [saveLoading, setSaveLoading] = useState(false);
+  const [drawing, setDrawing] = useState(null);
+
+  // Color palettes for display
+  const COLOR_PALETTES = [
     {
       name: 'Default',
-      colors: ['#FF6B9D', '#FFD700', '#00CED1', '#32CD32', '#FF8C00', '#8B00FF', '#FFA500', '#4169E1'],
+      displayName: '🎨 Default',
+      colors: ['#FF6B9D', '#FFD700', '#00CED1', '#32CD32', '#FF8C00', '#8B00FF'],
     },
     {
       name: 'Pastel',
-      colors: ['#FFB3BA', '#FFCCCB', '#FFFFBA', '#BAE1FF', '#BAC2FF', '#E0BBE4', '#D2BEE7', '#C8E6C9'],
+      displayName: '🌸 Pastel',
+      colors: ['#FFB3BA', '#FFCCCB', '#FFFFBA', '#BAE1FF', '#BAC2FF', '#E0BBE4'],
     },
     {
       name: 'Vibrant',
-      colors: ['#FF0000', '#FF7F00', '#FFFF00', '#00FF00', '#0000FF', '#4B0082', '#FF1493', '#00FFFF'],
+      displayName: '⚡ Vibrant',
+      colors: ['#FF0000', '#FF7F00', '#FFFF00', '#00FF00', '#0000FF', '#FF1493'],
     },
     {
       name: 'Ocean',
-      colors: ['#001F3F', '#0074D9', '#007EFF', '#B6E3FF', '#DDECF7', '#004E89', '#1B6CA8', '#4DA6D6'],
+      displayName: '🌊 Ocean',
+      colors: ['#001F3F', '#0074D9', '#007EFF', '#B6E3FF', '#004E89', '#4DA6D6'],
     },
     {
       name: 'Sunset',
-      colors: ['#FF6B35', '#F7931E', '#FDB833', '#F37335', '#C1272D', '#EE964B', '#FFD700', '#FF4500'],
+      displayName: '🌅 Sunset',
+      colors: ['#FF6B35', '#F7931E', '#FDB833', '#F37335', '#FF4500', '#EE964B'],
     },
     {
       name: 'Forest',
-      colors: ['#134E5E', '#1B998B', '#2ECC71', '#27AE60', '#16A085', '#117A65', '#0E6251', '#52B788'],
+      displayName: '🌲 Forest',
+      colors: ['#134E5E', '#1B998B', '#2ECC71', '#27AE60', '#117A65', '#52B788'],
     },
   ];
 
-  const currentPalette = colorPalettes[colorPaletteIdx];
-  const currentImage = book.images[currentPageIdx];
-  const currentVariant = currentImage?.variants?.[colorPaletteIdx] || currentImage;
+  const currentPage = book.pages[currentPageIndex];
+  const currentImage = currentPage?.colorVariants?.[currentPaletteIndex] || currentPage?.baseImage;
 
-  // Pan responder for drawing gestures
-  const panResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
-      onPanResponderGrant: () => {
-        setIsDrawing(true);
-      },
-      onPanResponderMove: (evt, gestureState) => {
-        // Drawing logic would go here with Skia canvas
-        // For now, we'll implement basic drawing
-      },
-      onPanResponderRelease: () => {
-        setIsDrawing(false);
-      },
-    })
-  ).current;
+  useEffect(() => {
+    loadPageState();
+  }, [currentPageIndex]);
 
-  const handleNextPage = () => {
-    if (currentPageIdx < book.images.length - 1) {
-      // Save current page state before moving
-      savePage();
-      setCurrentPageIdx(currentPageIdx + 1);
-      setColorPaletteIdx(0); // Reset to default palette
+  const loadPageState = async () => {
+    try {
+      const key = `coloring_${book.id}_page_${currentPageIndex}`;
+      const state = await AsyncStorage.getItem(key);
+      if (state) {
+        setDrawing(JSON.parse(state));
+      }
+    } catch (error) {
+      console.error('Error loading page state:', error);
     }
   };
 
-  const handlePrevPage = () => {
-    if (currentPageIdx > 0) {
-      savePage();
-      setCurrentPageIdx(currentPageIdx - 1);
-      setColorPaletteIdx(0);
-    }
-  };
-
-  const savePage = async () => {
+  const savePageState = async () => {
     try {
       setSaveLoading(true);
-      const pageState = {
-        pageIdx: currentPageIdx,
-        colorPaletteIdx,
-        brushSize,
+      const key = `coloring_${book.id}_page_${currentPageIndex}`;
+      const state = {
+        pageIndex: currentPageIndex,
+        paletteIndex: currentPaletteIndex,
+        drawing: drawing,
         timestamp: new Date().toISOString(),
       };
+      await AsyncStorage.setItem(key, JSON.stringify(state));
       
-      const key = `book_${book.id}_page_${currentPageIdx}`;
-      await AsyncStorage.setItem(key, JSON.stringify(pageState));
+      // Also mark book as edited
+      const bookData = JSON.parse(await AsyncStorage.getItem(`book_${book.id}`));
+      if (bookData) {
+        bookData.lastEdited = new Date().toISOString();
+        bookData.coloredPages = Math.max(bookData.coloredPages || 0, currentPageIndex + 1);
+        await AsyncStorage.setItem(`book_${book.id}`, JSON.stringify(bookData));
+      }
       
       setSaveLoading(false);
     } catch (error) {
@@ -118,71 +109,91 @@ export default function ColoringScreen({ route, navigation }) {
     }
   };
 
-  const handleSwitchPalette = (idx) => {
-    setColorPaletteIdx(idx);
-    // Instantly load the pre-generated variant
-  };
-
-  const handleFinishColoring = async () => {
-    await savePage();
-    // Save book as completed
-    const bookState = {
-      ...book,
-      coloredPages: book.images.length,
-      lastEdited: new Date().toISOString(),
-    };
-    
-    try {
-      await AsyncStorage.setItem(`book_${book.id}`, JSON.stringify(bookState));
-      Alert.alert('Saved!', 'Your coloring progress has been saved.', [
-        { text: 'Continue', onPress: () => {} },
-        { text: 'Back to Books', onPress: () => navigation.goBack() },
-      ]);
-    } catch (error) {
-      console.error('Error saving book:', error);
-      Alert.alert('Error', 'Failed to save your work.');
+  const handleNextPage = () => {
+    if (currentPageIndex < book.pages.length - 1) {
+      savePageState();
+      setCurrentPageIndex(currentPageIndex + 1);
+      setCurrentPaletteIndex(0); // Reset palette on new page
     }
   };
 
-  const handleUndo = () => {
-    // Undo logic with Skia canvas
-    Alert.alert('Info', 'Undo functionality coming soon');
+  const handlePrevPage = () => {
+    if (currentPageIndex > 0) {
+      savePageState();
+      setCurrentPageIndex(currentPageIndex - 1);
+      setCurrentPaletteIndex(0);
+    }
   };
 
-  const handleEraser = () => {
-    setSelectedColor('white');
+  const handleSwitchPalette = (paletteIdx) => {
+    setCurrentPaletteIndex(paletteIdx);
+    // INSTANT: No regeneration needed because variants were pre-generated during book creation
   };
+
+  const handleFinishColoring = async () => {
+    await savePageState();
+    Alert.alert(
+      'Coloring Session Saved',
+      'Your progress has been saved. You can continue coloring anytime!',
+      [
+        {
+          text: 'Continue',
+          onPress: () => {}, // Stay on screen
+        },
+        {
+          text: 'Back to Books',
+          onPress: () => navigation.goBack(),
+        },
+        {
+          text: 'Go to Checkout',
+          onPress: () => {
+            navigation.navigate('Checkout', { book });
+          },
+        },
+      ]
+    );
+  };
+
+  const handleClear = () => {
+    Alert.alert('Clear Drawing?', 'This will erase your work on this page.', [
+      { text: 'Cancel' },
+      {
+        text: 'Clear',
+        onPress: () => setDrawing(null),
+        style: 'destructive',
+      },
+    ]);
+  };
+
+  const palette = COLOR_PALETTES[currentPaletteIndex];
 
   return (
     <View style={styles.container}>
-      {/* Main Canvas Area */}
-      <View style={styles.canvasWrapper}>
+      {/* Image Display */}
+      <View style={styles.imageContainer}>
         <Image
-          source={{ uri: typeof currentVariant === 'string' ? currentVariant : currentImage }}
+          source={{ uri: currentImage }}
           style={styles.image}
           resizeMode="contain"
-          onError={(error) => {
-            console.log('Image load error:', error);
-          }}
         />
-        {/* Drawing canvas overlay would go here with Skia */}
       </View>
 
-      {/* Color Palette Selection */}
-      <View style={styles.paletteContainer}>
-        <Text style={styles.paletteLabel}>Palettes (instant switching):</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.paletteScroll}>
-          {colorPalettes.map((palette, idx) => (
+      {/* Palette Selection Section */}
+      <View style={styles.paletteSection}>
+        <Text style={styles.sectionTitle}>Choose a color palette:</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.palettesScroll}>
+          {COLOR_PALETTES.map((p, idx) => (
             <TouchableOpacity
               key={idx}
               style={[
-                styles.paletteOption,
-                colorPaletteIdx === idx && styles.paletteOptionActive,
+                styles.paletteCard,
+                currentPaletteIndex === idx && styles.paletteCardActive,
               ]}
               onPress={() => handleSwitchPalette(idx)}
+              activeOpacity={0.7}
             >
-              <View style={styles.paletteSwatch}>
-                {palette.colors.slice(0, 4).map((color, cidx) => (
+              <View style={styles.paletteColorGrid}>
+                {p.colors.map((color, cidx) => (
                   <View
                     key={cidx}
                     style={[
@@ -192,94 +203,87 @@ export default function ColoringScreen({ route, navigation }) {
                   />
                 ))}
               </View>
-              <Text style={[styles.paletteLabel, { fontSize: 11, marginTop: 3 }]}>
-                {palette.name}
+              <Text style={[
+                styles.paletteName,
+                currentPaletteIndex === idx && styles.paletteNameActive,
+              ]}>
+                {p.displayName}
               </Text>
             </TouchableOpacity>
           ))}
         </ScrollView>
       </View>
 
-      {/* Color Picker and Tools */}
-      <View style={styles.toolsContainer}>
-        <Text style={styles.toolsLabel}>Colors:</Text>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.colorScroll}>
-          {currentPalette.colors.map((color) => (
-            <TouchableOpacity
-              key={color}
-              style={[
-                styles.colorOption,
-                { backgroundColor: color },
-                selectedColor === color && styles.colorSelected,
-              ]}
-              onPress={() => setSelectedColor(color)}
-            />
+      {/* Colors Available for Selected Palette */}
+      <View style={styles.colorsSection}>
+        <Text style={styles.sectionTitle}>Colors to use:</Text>
+        <View style={styles.colorsGrid}>
+          {palette.colors.map((color, idx) => (
+            <View key={idx} style={[styles.colorSwatch, { backgroundColor: color }]} />
           ))}
-        </ScrollView>
-
-        {/* Brush Controls */}
-        <View style={styles.brushContainer}>
-          <TouchableOpacity style={styles.toolButton} onPress={handleUndo}>
-            <Text style={styles.toolButtonText}>↶ Undo</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.toolButton} onPress={handleEraser}>
-            <Text style={styles.toolButtonText}>🧹 Eraser</Text>
-          </TouchableOpacity>
-          <View style={styles.brushSize}>
-            <Text style={styles.brushLabel}>Size:</Text>
-            <TouchableOpacity
-              onPress={() => setBrushSize(Math.max(2, brushSize - 1))}
-              style={styles.brushButton}
-            >
-              <Text>−</Text>
-            </TouchableOpacity>
-            <View style={[styles.brushPreview, { width: brushSize * 3, height: brushSize * 3 }]} />
-            <TouchableOpacity
-              onPress={() => setBrushSize(Math.min(20, brushSize + 1))}
-              style={styles.brushButton}
-            >
-              <Text>+</Text>
-            </TouchableOpacity>
-          </View>
         </View>
+        <Text style={styles.colorNote}>💡 Tap any color in the palette above to select it</Text>
       </View>
 
       {/* Page Navigation */}
-      <View style={styles.navigationContainer}>
+      <View style={styles.navigationSection}>
         <TouchableOpacity
-          style={[styles.navButton, currentPageIdx === 0 && styles.navButtonDisabled]}
+          style={[styles.navButton, currentPageIndex === 0 && styles.navButtonDisabled]}
           onPress={handlePrevPage}
-          disabled={currentPageIdx === 0}
+          disabled={currentPageIndex === 0}
         >
-          <Text style={styles.navButtonText}>← Previous</Text>
+          <Text style={styles.navButtonText}>← Prev</Text>
         </TouchableOpacity>
-        <Text style={styles.pageIndicator}>
-          Page {currentPageIdx + 1} of {book.images.length}
-        </Text>
+
+        <View style={styles.pageInfo}>
+          <Text style={styles.pageIndicator}>
+            Page {currentPageIndex + 1} of {book.pages.length}
+          </Text>
+          <Text style={styles.paletteIndicator}>
+            Palette: {palette.name}
+          </Text>
+        </View>
+
         <TouchableOpacity
           style={[
             styles.navButton,
-            currentPageIdx === book.images.length - 1 && styles.navButtonDisabled,
+            currentPageIndex === book.pages.length - 1 && styles.navButtonDisabled,
           ]}
           onPress={handleNextPage}
-          disabled={currentPageIdx === book.images.length - 1}
+          disabled={currentPageIndex === book.pages.length - 1}
         >
           <Text style={styles.navButtonText}>Next →</Text>
         </TouchableOpacity>
       </View>
 
-      {/* Finish Button */}
-      <TouchableOpacity
-        style={styles.finishButton}
-        onPress={handleFinishColoring}
-        disabled={saveLoading}
-      >
-        {saveLoading ? (
-          <ActivityIndicator color="#fff" />
-        ) : (
-          <Text style={styles.finishButtonText}>✅ Finish & Save</Text>
-        )}
-      </TouchableOpacity>
+      {/* Action Buttons */}
+      <View style={styles.actionSection}>
+        <TouchableOpacity
+          style={[styles.actionButton, styles.clearButton]}
+          onPress={handleClear}
+        >
+          <Text style={styles.clearButtonText}>🧹 Clear</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.actionButton, styles.saveButton]}
+          onPress={handleFinishColoring}
+          disabled={saveLoading}
+        >
+          {saveLoading ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <Text style={styles.saveButtonText}>✅ Save Progress</Text>
+          )}
+        </TouchableOpacity>
+      </View>
+
+      {/* Note */}
+      <View style={styles.noteBox}>
+        <Text style={styles.noteText}>
+          ℹ️ All color palettes are pre-loaded for instant switching. Your drawing progress is auto-saved.
+        </Text>
+      </View>
     </View>
   );
 }
@@ -289,176 +293,182 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#fff',
   },
-  canvasWrapper: {
-    flex: 1,
+  imageContainer: {
+    height: screenWidth * 0.6,
+    backgroundColor: '#f9f9f9',
     justifyContent: 'center',
     alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
   image: {
-    width: '100%',
+    width: screenWidth - 20,
     height: '100%',
   },
-  paletteContainer: {
-    paddingHorizontal: 15,
-    paddingVertical: 12,
-    backgroundColor: '#f9f9f9',
-    borderBottomWidth: 1,
-    borderBottomColor: '#eee',
-  },
-  paletteLabel: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#666',
-    marginBottom: 8,
-  },
-  paletteScroll: {
-    height: 90,
-    marginBottom: 5,
-  },
-  paletteOption: {
-    marginRight: 12,
-    alignItems: 'center',
-    opacity: 0.6,
-  },
-  paletteOptionActive: {
-    opacity: 1,
-    borderWidth: 2,
-    borderColor: '#FF6B9D',
-    borderRadius: 12,
-    padding: 4,
-  },
-  paletteSwatch: {
-    width: 60,
-    height: 60,
-    borderRadius: 8,
-    padding: 4,
-    backgroundColor: '#fff',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 2,
-  },
-  paletteColorDot: {
-    width: '48%',
-    height: '48%',
-    borderRadius: 2,
-  },
-  toolsContainer: {
+
+  paletteSection: {
     paddingHorizontal: 15,
     paddingVertical: 12,
     backgroundColor: '#fafafa',
     borderBottomWidth: 1,
     borderBottomColor: '#eee',
   },
-  toolsLabel: {
-    fontSize: 12,
-    fontWeight: 'bold',
-    color: '#666',
-    marginBottom: 8,
-  },
-  colorScroll: {
-    marginBottom: 12,
-    height: 50,
-  },
-  colorOption: {
-    width: 48,
-    height: 48,
-    borderRadius: 8,
-    marginRight: 8,
-    borderWidth: 2,
-    borderColor: '#ddd',
-  },
-  colorSelected: {
-    borderColor: '#333',
-    borderWidth: 3,
-  },
-  brushContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  toolButton: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: '#fff',
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#FF6B9D',
-  },
-  toolButtonText: {
-    color: '#FF6B9D',
-    fontSize: 12,
+  sectionTitle: {
+    fontSize: 13,
     fontWeight: '600',
+    color: '#666',
+    marginBottom: 10,
   },
-  brushSize: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#fff',
+  palettesScroll: {
+    marginBottom: 5,
+  },
+  paletteCard: {
+    marginRight: 12,
     paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: '#ddd',
-  },
-  brushLabel: {
-    fontSize: 11,
-    color: '#666',
-    fontWeight: '600',
-  },
-  brushButton: {
-    padding: 4,
-    paddingHorizontal: 8,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 4,
-  },
-  brushPreview: {
-    borderRadius: 2,
-    backgroundColor: '#FF6B9D',
-  },
-  navigationContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+    paddingVertical: 8,
+    borderRadius: 10,
+    backgroundColor: '#fff',
+    borderWidth: 2,
+    borderColor: '#eee',
     alignItems: 'center',
+  },
+  paletteCardActive: {
+    borderColor: '#FF6B9D',
+    backgroundColor: '#FFF5F8',
+  },
+  paletteColorGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    width: 70,
+    gap: 3,
+    marginBottom: 6,
+  },
+  paletteColorDot: {
+    width: 13,
+    height: 13,
+    borderRadius: 2,
+  },
+  paletteName: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: '#666',
+  },
+  paletteNameActive: {
+    color: '#FF6B9D',
+    fontWeight: '700',
+  },
+
+  colorsSection: {
     paddingHorizontal: 15,
     paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#eee',
     backgroundColor: '#fff',
   },
-  navButton: {
-    paddingHorizontal: 15,
-    paddingVertical: 10,
-    backgroundColor: '#FF6B9D',
+  colorsGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 8,
+  },
+  colorSwatch: {
+    width: (screenWidth - 50) / 4,
+    height: (screenWidth - 50) / 4,
     borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  colorNote: {
+    fontSize: 12,
+    color: '#999',
+    fontStyle: 'italic',
+    textAlign: 'center',
+  },
+
+  navigationSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    backgroundColor: '#fafafa',
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  navButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: '#FF6B9D',
+    borderRadius: 6,
   },
   navButtonDisabled: {
     opacity: 0.3,
   },
   navButtonText: {
     color: '#fff',
-    fontWeight: 'bold',
     fontSize: 12,
-  },
-  pageIndicator: {
-    fontSize: 13,
-    color: '#666',
     fontWeight: '600',
   },
-  finishButton: {
-    marginHorizontal: 15,
-    marginBottom: 15,
-    paddingVertical: 14,
-    backgroundColor: '#FF6B9D',
-    borderRadius: 10,
+  pageInfo: {
+    alignItems: 'center',
+  },
+  pageIndicator: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#333',
+  },
+  paletteIndicator: {
+    fontSize: 11,
+    color: '#999',
+    marginTop: 2,
+  },
+
+  actionSection: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 15,
+    paddingVertical: 10,
+    backgroundColor: '#fff',
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+  },
+  actionButton: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  finishButtonText: {
+  clearButton: {
+    backgroundColor: '#f0f0f0',
+    borderWidth: 1,
+    borderColor: '#ddd',
+  },
+  clearButtonText: {
+    color: '#666',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  saveButton: {
+    backgroundColor: '#FF6B9D',
+  },
+  saveButtonText: {
     color: '#fff',
-    fontSize: 15,
-    fontWeight: 'bold',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  noteBox: {
+    marginHorizontal: 15,
+    marginBottom: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    backgroundColor: '#F0F7FF',
+    borderLeftWidth: 3,
+    borderLeftColor: '#0074D9',
+    borderRadius: 4,
+  },
+  noteText: {
+    fontSize: 11,
+    color: '#333',
+    fontStyle: 'italic',
   },
 });

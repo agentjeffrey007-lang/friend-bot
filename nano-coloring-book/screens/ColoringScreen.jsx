@@ -1,4 +1,4 @@
-import React, { useState, useRef, useCallback } from 'react';
+import React, { useState, useRef, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,11 @@ import {
   ScrollView,
   PanResponder,
   Dimensions,
+  Alert,
+  ActivityIndicator,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { updateBook } from '../utils/storage';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const CANVAS_SIZE = SCREEN_WIDTH - 40;
@@ -56,6 +60,47 @@ export default function ColoringScreen({ route, navigation }) {
   ];
 
   const pageStrokes = strokes[currentPageIdx] || [];
+  const [saving, setSaving] = useState(false);
+
+  // Save strokes progress to AsyncStorage
+  const saveProgress = useCallback(async () => {
+    if (!book.id) return;
+    try {
+      setSaving(true);
+      // Save strokes and palette state per book
+      const coloringState = {
+        bookId: book.id,
+        strokes,
+        currentPageIdx,
+        selectedPaletteIdx,
+        lastEdited: new Date().toISOString(),
+      };
+      await AsyncStorage.setItem(`coloring_${book.id}`, JSON.stringify(coloringState));
+      
+      // Update book's editing status
+      await updateBook(book.id, {
+        coloredPages: Object.keys(strokes).filter(k => strokes[k].length > 0).length,
+        lastEdited: new Date().toISOString(),
+      }).catch(err => console.warn('Could not update book:', err));
+      
+      setSaving(false);
+      Alert.alert('Saved!', 'Your coloring progress has been saved.');
+    } catch (error) {
+      console.error('Error saving progress:', error);
+      setSaving(false);
+      Alert.alert('Error', 'Failed to save progress. Please try again.');
+    }
+  }, [book.id, strokes, currentPageIdx, selectedPaletteIdx]);
+
+  // Auto-save when leaving the screen
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('beforeRemove', () => {
+      if (Object.keys(strokes).length > 0) {
+        saveProgress();
+      }
+    });
+    return unsubscribe;
+  }, [navigation, saveProgress, strokes]);
 
   // PanResponder for drawing - now reads from refs instead of closure
   const panResponder = useRef(
@@ -249,6 +294,23 @@ export default function ColoringScreen({ route, navigation }) {
           <Text style={styles.navButtonText}>Next →</Text>
         </TouchableOpacity>
       </View>
+
+      {/* Save Progress Footer */}
+      <View style={styles.footerContainer}>
+        <TouchableOpacity
+          style={styles.saveButton}
+          onPress={saveProgress}
+          disabled={saving}
+        >
+          {saving ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <>
+              <Text style={styles.saveButtonText}>💾 Save Progress</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -384,5 +446,25 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#555',
     fontWeight: '700',
+  },
+  footerContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#eee',
+    backgroundColor: '#fff',
+  },
+  saveButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: '#FF6B9D',
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  saveButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 14,
   },
 });

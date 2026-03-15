@@ -24,17 +24,27 @@ export default function PreviewScreen({ route, navigation }) {
     }).start();
   };
 
+  // Handle both old image format (array of URLs) and new format (with variants)
+  const currentImage = images[selectedImageIdx];
+  const displayImage = typeof currentImage === 'string' ? currentImage : currentImage?.base || currentImage;
+  const isColorVariantEnabled = currentImage?.variants ? true : false;
+
   return (
     <View style={styles.container}>
       <ScrollView style={styles.mainImageContainer}>
         <Animated.Image
-          source={{ uri: images[selectedImageIdx] }}
+          source={{ uri: displayImage }}
           style={[
             styles.mainImage,
             { transform: [{ scale }] },
           ]}
           resizeMode="contain"
         />
+        {isColorVariantEnabled && (
+          <Text style={styles.variantBadge}>
+            ✓ {currentImage.paletteNames?.length || 6} color variants ready
+          </Text>
+        )}
       </ScrollView>
 
       <ScrollView
@@ -42,18 +52,21 @@ export default function PreviewScreen({ route, navigation }) {
         style={styles.thumbnailContainer}
         showsHorizontalScrollIndicator={false}
       >
-        {images.map((img, idx) => (
-          <TouchableOpacity
-            key={idx}
-            onPress={() => setSelectedImageIdx(idx)}
-            style={[
-              styles.thumbnail,
-              selectedImageIdx === idx && styles.thumbnailActive,
-            ]}
-          >
-            <Image source={{ uri: img }} style={styles.thumbnailImage} />
-          </TouchableOpacity>
-        ))}
+        {images.map((img, idx) => {
+          const thumbnailSrc = typeof img === 'string' ? img : img?.base || img;
+          return (
+            <TouchableOpacity
+              key={idx}
+              onPress={() => setSelectedImageIdx(idx)}
+              style={[
+                styles.thumbnail,
+                selectedImageIdx === idx && styles.thumbnailActive,
+              ]}
+            >
+              <Image source={{ uri: thumbnailSrc }} style={styles.thumbnailImage} />
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
 
       <View style={styles.buttonContainer}>
@@ -137,5 +150,13 @@ const styles = StyleSheet.create({
     color: '#333',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+  variantBadge: {
+    marginTop: 10,
+    fontSize: 12,
+    color: '#27AE60',
+    fontWeight: '600',
+    textAlign: 'center',
+    paddingHorizontal: 15,
   },
 });

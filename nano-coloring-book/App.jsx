@@ -2,7 +2,7 @@ import React from 'react';
 import { NavigationContainer } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { Text, View } from 'react-native';
+import { Text } from 'react-native';
 
 // Screens
 import CreateBookScreen from './screens/CreateBookScreen';
@@ -14,15 +14,15 @@ import CheckoutScreen from './screens/CheckoutScreen';
 const Stack = createNativeStackNavigator();
 const Tab = createBottomTabNavigator();
 
+const headerOptions = {
+  headerStyle: { backgroundColor: '#fff' },
+  headerTintColor: '#333',
+  headerTitleStyle: { fontWeight: 'bold' },
+};
+
 function HomeTab() {
   return (
-    <Stack.Navigator
-      screenOptions={{
-        headerStyle: { backgroundColor: '#fff' },
-        headerTintColor: '#333',
-        headerTitleStyle: { fontWeight: 'bold' },
-      }}
-    >
+    <Stack.Navigator screenOptions={headerOptions}>
       <Stack.Screen
         name="CreateBook"
         component={CreateBookScreen}
@@ -33,19 +33,18 @@ function HomeTab() {
         component={PreviewScreen}
         options={{ title: 'Preview' }}
       />
+      <Stack.Screen
+        name="Checkout"
+        component={CheckoutScreen}
+        options={{ title: 'Checkout' }}
+      />
     </Stack.Navigator>
   );
 }
 
 function BooksTab() {
   return (
-    <Stack.Navigator
-      screenOptions={{
-        headerStyle: { backgroundColor: '#fff' },
-        headerTintColor: '#333',
-        headerTitleStyle: { fontWeight: 'bold' },
-      }}
-    >
+    <Stack.Navigator screenOptions={headerOptions}>
       <Stack.Screen
         name="MyBooks"
         component={MyBooksScreen}

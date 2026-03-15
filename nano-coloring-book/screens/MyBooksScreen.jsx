@@ -6,24 +6,41 @@ import {
   TouchableOpacity,
   StyleSheet,
   Image,
-  AsyncStorage,
+  ActivityIndicator,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function MyBooksScreen({ navigation }) {
   const [books, setBooks] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    loadBooks();
-  }, []);
+    const unsubscribe = navigation.addListener('focus', () => {
+      loadBooks();
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   const loadBooks = async () => {
     try {
-      const saved = await AsyncStorage.getItem('savedBooks');
-      if (saved) {
-        setBooks(JSON.parse(saved));
+      setLoading(true);
+      // Get all keys that start with 'book_'
+      const allKeys = await AsyncStorage.getAllKeys();
+      const bookKeys = allKeys.filter(key => key.startsWith('book_') && !key.includes('_page_'));
+      
+      const loadedBooks = [];
+      for (const key of bookKeys) {
+        const bookData = await AsyncStorage.getItem(key);
+        if (bookData) {
+          loadedBooks.push(JSON.parse(bookData));
+        }
       }
+      
+      setBooks(loadedBooks);
+      setLoading(false);
     } catch (error) {
       console.error('Error loading books:', error);
+      setLoading(false);
     }
   };
 
@@ -41,10 +58,20 @@ export default function MyBooksScreen({ navigation }) {
     </TouchableOpacity>
   );
 
+  if (loading) {
+    return (
+      <View style={[styles.container, styles.centerContent]}>
+        <ActivityIndicator size="large" color="#FF6B9D" />
+        <Text style={{ marginTop: 15, color: '#666' }}>Loading books...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {books.length === 0 ? (
         <View style={styles.emptyContainer}>
+          <Text style={styles.emptyIcon}>📚</Text>
           <Text style={styles.emptyText}>No books yet</Text>
           <Text style={styles.emptySubtext}>Create your first coloring book!</Text>
         </View>
@@ -54,6 +81,8 @@ export default function MyBooksScreen({ navigation }) {
           renderItem={renderBook}
           keyExtractor={(_, idx) => idx.toString()}
           contentContainerStyle={styles.listContainer}
+          refreshing={loading}
+          onRefresh={loadBooks}
         />
       )}
     </View>
@@ -79,6 +108,14 @@ const styles = StyleSheet.create({
   emptySubtext: {
     fontSize: 14,
     color: '#999',
+  },
+  emptyIcon: {
+    fontSize: 48,
+    marginBottom: 10,
+  },
+  centerContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   listContainer: {
     padding: 15,

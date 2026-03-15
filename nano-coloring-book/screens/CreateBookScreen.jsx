@@ -59,10 +59,41 @@ export default function CreateBookScreen({ navigation }) {
 
     // Generate 10 images via Nano Banana
     const generatedImages = await generateImage(finalPrompt, 10);
-    setImages(generatedImages);
+    
+    // CRITICAL: Generate 5+ color palette variants for EACH image in parallel
+    // This happens during creation so coloring screen can switch instantly
+    const imageVariants = await Promise.all(
+      generatedImages.map(async (image, idx) => {
+        const colorPalettes = [
+          'default colors',
+          'pastel soft colors',
+          'vibrant bright colors',
+          'ocean blue colors',
+          'sunset orange colors',
+          'forest green colors',
+        ];
+        
+        // Generate variants for each palette in parallel
+        const variants = await Promise.all(
+          colorPalettes.map((paletteStyle) =>
+            generateImage(
+              `${finalPrompt}. Color style: ${paletteStyle}. Apply these colors to the image. Generate the same coloring page design but with ${paletteStyle} applied.`,
+              1
+            )
+          )
+        );
+        
+        return {
+          base: image,
+          variants: variants.flat(),
+          paletteNames: colorPalettes,
+        };
+      })
+    );
 
+    setImages(imageVariants);
     setLoading(false);
-    navigation.navigate('Preview', { images, prompt: finalPrompt });
+    navigation.navigate('Preview', { images: imageVariants, prompt: finalPrompt });
   };
 
   if (step === 'menu') {

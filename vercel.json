@@ -1,4 +1,4 @@
 {
-  "buildCommand": "cd nano-coloring-web && npm run build",
+  "buildCommand": "cd nano-coloring-web && npm install && npm run build",
   "outputDirectory": "nano-coloring-web/build"
 }

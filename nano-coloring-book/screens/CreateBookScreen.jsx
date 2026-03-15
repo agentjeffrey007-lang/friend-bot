@@ -11,6 +11,7 @@ import {
 import { generateContextualQuestions, synthesizePrompt } from '../utils/promptEngine';
 import { generateImage, generateColorVariants } from '../utils/nanoBananaAPI';
 import { saveBook } from '../utils/storage';
+import GenerationLoadingScreen from './GenerationLoadingScreen';
 
 export default function CreateBookScreen({ navigation }) {
   const [step, setStep] = useState('menu'); // menu, input, questions, chat, generating
@@ -21,6 +22,10 @@ export default function CreateBookScreen({ navigation }) {
   const [chatMessage, setChatMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const [generationProgress, setGenerationProgress] = useState('');
+  const [generatedPagesCount, setGeneratedPagesCount] = useState(0);
+  const [totalPagesToGenerate] = useState(10);
+  const [firstGeneratedImage, setFirstGeneratedImage] = useState(null);
+  const [allImagesGenerated, setAllImagesGenerated] = useState(false);
 
   const handleCreateBook = async () => {
     if (!userInput.trim()) return;
@@ -49,19 +54,34 @@ export default function CreateBookScreen({ navigation }) {
   const handleGenerateBook = async () => {
     setLoading(true);
     setStep('generating');
+    setGeneratedPagesCount(0);
+    setFirstGeneratedImage(null);
+    setAllImagesGenerated(false);
 
     try {
       // 1. Synthesize final prompt
-      setGenerationProgress('Crafting your perfect prompt...');
       const finalPrompt = await synthesizePrompt(userInput, answers, chatMessage);
 
-      // 2. Generate base images (10 pages)
-      setGenerationProgress('Drawing your coloring pages... (this may take a minute)');
+      // 2. Generate base images (10 pages) with progress callback
       const PAGE_COUNT = 10;
-      const generatedImages = await generateImage(finalPrompt, PAGE_COUNT);
+      const generatedImages = await generateImage(
+        finalPrompt,
+        PAGE_COUNT,
+        (currentIndex, totalCount) => {
+          setGeneratedPagesCount(currentIndex + 1);
+          
+          // Store first image when it's ready
+          if (currentIndex === 0 && generatedImages[0] && !firstGeneratedImage) {
+            setFirstGeneratedImage(generatedImages[0]);
+          }
+        }
+      );
 
-      // 3. Pre-generate color palettes for each page (CRITICAL)
-      setGenerationProgress('Creating color palettes for each page...');
+      // Mark all images as generated
+      setAllImagesGenerated(true);
+      setFirstGeneratedImage(generatedImages[0]);
+
+      // 3. Pre-generate color palettes for each page
       const pagesWithVariants = await Promise.all(
         generatedImages.map(async (img, idx) => {
           const variants = await generateColorVariants(img, idx);
@@ -73,7 +93,6 @@ export default function CreateBookScreen({ navigation }) {
       );
 
       // 4. Save book to storage
-      setGenerationProgress('Saving your book...');
       const book = await saveBook({
         title: userInput,
         prompt: finalPrompt,
@@ -94,9 +113,21 @@ export default function CreateBookScreen({ navigation }) {
       console.error('Generation error:', error);
       setLoading(false);
       setStep('chat');
-      // Could show an alert here
     }
   };
+
+  // Show loading screen during generation
+  if (step === 'generating') {
+    return (
+      <GenerationLoadingScreen
+        currentPage={generatedPagesCount}
+        totalPages={totalPagesToGenerate}
+        firstImage={firstGeneratedImage}
+        allImagesGenerated={allImagesGenerated}
+        isFirstImageReady={!!firstGeneratedImage}
+      />
+    );
+  }
 
   if (step === 'menu') {
     return (

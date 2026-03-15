@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>Nano Coloring</title>
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif; background: #fff; }
+        .menu { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, #fff 0%, #f9f9f9 100%); padding: 20px; }
+        .container { text-align: center; max-width: 400px; }
+        h1 { font-size: 48px; margin-bottom: 10px; }
+        p { font-size: 18px; color: #666; margin-bottom: 40px; }
+        button { width: 100%; padding: 15px; border: none; border-radius: 10px; font-size: 16px; font-weight: bold; cursor: pointer; margin-bottom: 15px; }
+        .btn-primary { background: #FF6B9D; color: #fff; }
+        .btn-secondary { background: #f0f0f0; color: #333; border: 2px solid #ddd; }
+        button:hover { opacity: 0.9; }
+        .screen { min-height: 100vh; padding: 20px; }
+        input, textarea { width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 8px; font-size: 16px; margin-bottom: 20px; font-family: inherit; }
+        .preview-img { max-width: 100%; max-height: 400px; border-radius: 10px; margin: 20px 0; }
+        .thumbnails { display: flex; gap: 10px; overflow-x: auto; margin: 20px 0; }
+        .thumbnail { width: 80px; height: 80px; border: 3px solid #ddd; border-radius: 8px; cursor: pointer; flex-shrink: 0; }
+        .thumbnail.active { border-color: #FF6B9D; }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+    <script>
+        const { useState } = React;
+        
+        function App() {
+            const [screen, setScreen] = useState('menu');
+            const [input, setInput] = useState('');
+            const [selectedIdx, setSelectedIdx] = useState(0);
+            const [currentPage, setCurrentPage] = useState(0);
+            const [selectedColor, setSelectedColor] = useState('#FF6B9D');
+            
+            const colors = ['#000', '#FF6B9D', '#FFD700', '#00CED1', '#32CD32', '#FF8C00'];
+            
+            const generatePlaceholders = (count) => {
+                return Array(count).fill().map((_, i) => 
+                    `data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='512' height='512'%3E%3Crect fill='%23fff' width='512' height='512'/%3E%3Crect x='50' y='50' width='412' height='412' fill='none' stroke='%23000' stroke-width='2'/%3E%3Ctext x='256' y='220' font-size='24' text-anchor='middle' font-weight='bold' fill='%23333'%3E${input}%3C/text%3E%3Ctext x='256' y='260' font-size='16' text-anchor='middle' fill='%23999'%3EPage ${i + 1}%3C/text%3E%3C/svg%3E`
+                );
+            };
+            
+            const images = generatePlaceholders(10);
+            
+            if (screen === 'menu') {
+                return React.createElement('div', { className: 'menu' },
+                    React.createElement('div', { className: 'container' },
+                        React.createElement('h1', null, '🎨 Nano Coloring'),
+                        React.createElement('p', null, 'AI-powered coloring books for kids'),
+                        React.createElement('button', { className: 'btn-primary', onClick: () => setScreen('create') }, '✏️ Create Book'),
+                        React.createElement('button', { className: 'btn-secondary' }, '📚 My Books')
+                    )
+                );
+            }
+            
+            if (screen === 'create') {
+                return React.createElement('div', { className: 'screen' },
+                    React.createElement('h2', null, 'Create Your Book'),
+                    React.createElement('input', { type: 'text', value: input, onChange: (e) => setInput(e.target.value), placeholder: 'e.g., Turtles, Space...' }),
+                    React.createElement('button', { className: 'btn-primary', onClick: () => { if (input.trim()) setScreen('preview'); } }, '🎨 Generate Book'),
+                    React.createElement('button', { className: 'btn-secondary', onClick: () => setScreen('menu') }, '← Back')
+                );
+            }
+            
+            if (screen === 'preview') {
+                return React.createElement('div', { className: 'screen' },
+                    React.createElement('h2', null, 'Preview'),
+                    React.createElement('img', { src: images[selectedIdx], className: 'preview-img', alt: 'Preview' }),
+                    React.createElement('div', { className: 'thumbnails' },
+                        images.map((img, idx) => 
+                            React.createElement('img', { key: idx, src: img, className: `thumbnail ${selectedIdx === idx ? 'active' : ''}`, onClick: () => setSelectedIdx(idx), alt: `Page ${idx + 1}` })
+                        )
+                    ),
+                    React.createElement('button', { className: 'btn-primary', onClick: () => setScreen('coloring') }, '🎨 Start Coloring'),
+                    React.createElement('button', { className: 'btn-secondary', onClick: () => setScreen('menu') }, '← Back')
+                );
+            }
+            
+            if (screen === 'coloring') {
+                return React.createElement('div', { className: 'screen' },
+                    React.createElement('img', { src: images[currentPage], className: 'preview-img', alt: 'Coloring page' }),
+                    React.createElement('div', { style: { display: 'flex', gap: '10px', marginBottom: '20px' } },
+                        colors.map(color =>
+                            React.createElement('div', { key: color, onClick: () => setSelectedColor(color), style: { width: '50px', height: '50px', background: color, borderRadius: '8px', border: selectedColor === color ? '4px solid #333' : '3px solid #ddd', cursor: 'pointer' } })
+                        )
+                    ),
+                    React.createElement('div', { style: { display: 'flex', justifyContent: 'space-between', gap: '10px', marginBottom: '20px' } },
+                        React.createElement('button', { className: 'btn-primary', onClick: () => setCurrentPage(Math.max(0, currentPage - 1)), disabled: currentPage === 0 }, '← Previous'),
+                        React.createElement('span', { style: { fontWeight: 'bold' } }, `Page ${currentPage + 1} / ${images.length}`),
+                        React.createElement('button', { className: 'btn-primary', onClick: () => setCurrentPage(Math.min(images.length - 1, currentPage + 1)), disabled: currentPage === images.length - 1 }, 'Next →')
+                    ),
+                    React.createElement('button', { className: 'btn-secondary', onClick: () => setScreen('menu') }, '← Home')
+                );
+            }
+        }
+        
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(App));
+    </script>
+</body>
+</html>
